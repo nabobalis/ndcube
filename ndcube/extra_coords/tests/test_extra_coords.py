@@ -616,7 +616,7 @@ def test_rebin_extra_coords_pixel_centers(kind):
     wcs = WCS(naxis=2)
     wcs.wcs.crpix = [1, 1]
     cube = NDCube(np.ones((4, 6)), wcs)
-    rows, columns = np.indices(cube.shape)
+    _, columns = np.indices(cube.shape)
     if kind == "wcs":
         cube.extra_coords.wcs = wcs
         cube.extra_coords.mapping = (0, 1)
@@ -633,3 +633,11 @@ def test_rebin_extra_coords_pixel_centers(kind):
     else:
         actual = actual.to_value(u.m) if kind == "quantity" else (actual - Time("2020-01-01")).to_value(u.s)
         np.testing.assert_allclose(actual, expected_x, atol=1e-6)
+
+
+@pytest.mark.parametrize("axes", [0, (0, 1, 2), (0, 0), (-1, 0), (0, 0.5), (0, 2)])
+def test_add_invalid_nd_axes(axes):
+    cube = NDCube(np.ones((2, 3)), WCS(naxis=2))
+    with pytest.raises(ValueError, match=r"[Aa]rray axes"):
+        cube.extra_coords.add("distance", axes, np.ones((2, 3)) * u.m)
+    assert cube.extra_coords.is_empty

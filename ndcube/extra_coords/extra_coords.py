@@ -227,6 +227,19 @@ class ExtraCoords(ExtraCoordsABC):
         else:
             raise TypeError(f"The input type {type(lookup_table)} isn't supported")
 
+        axes = (array_dimension,) if isinstance(array_dimension, Integral) else tuple(array_dimension)
+        n_inputs = coord.n_inputs
+        if isinstance(coord, SkyCoordTableCoordinate) and not coord.mesh:
+            n_inputs = coord.table.ndim
+        if len(axes) != n_inputs:
+            raise ValueError(f"Expected {n_inputs} array axes for this lookup table, got {len(axes)}.")
+        if any(not isinstance(axis, Integral) or axis < 0 for axis in axes):
+            raise ValueError("Array axes must be non-negative integers.")
+        if len(set(axes)) != len(axes):
+            raise ValueError("Array axes must be distinct.")
+        if self._ndcube is not None and any(axis >= len(self._ndcube.shape) for axis in axes):
+            raise ValueError("Array axes must be within the cube dimensions.")
+        array_dimension = axes[0] if isinstance(array_dimension, Integral) else axes
         self._lookup_tables.append((array_dimension, coord))
 
         # Sort the LUTs so that the mapping and the wcs are ordered in pixel dim order
