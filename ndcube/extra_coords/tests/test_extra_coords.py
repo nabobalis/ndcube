@@ -561,6 +561,24 @@ def test_length1_extra_coord(wave_lut):
     assert (sec.wcs.world_to_pixel(wave_lut[item])[0] == [0]).all()
 
 
+@pytest.mark.parametrize("shape", [(3, 4), (3, 3)])
+@pytest.mark.parametrize("kind", ["quantity", "time"])
+def test_nd_table_resample(shape, kind):
+    values = np.arange(np.prod(shape)).reshape(shape)
+    table = values * u.m if kind == "quantity" else Time("2020-01-01") + values * u.s
+    cube = NDCube(values, WCS(naxis=2))
+    cube.extra_coords.add(kind, (0, 1), table)
+
+    for factor in (1, 2):
+        resampled = cube.extra_coords.resample(factor)
+        rows, columns = np.indices(table[::factor, ::factor].shape)
+        actual = resampled.wcs.pixel_to_world(columns, rows)
+        assert actual.shape == table[::factor, ::factor].shape
+        difference = actual - table[::factor, ::factor]
+        unit = u.m if kind == "quantity" else u.s
+        np.testing.assert_allclose(difference.to_value(unit), 0, atol=1e-6)
+
+
 def test_2d_time_extra_coord_through_cube(wcs_3d_lt_ln_l):
     cube = NDCube(np.zeros((3, 4, 5)), wcs=wcs_3d_lt_ln_l)
     times = Time("2020-01-01T00:00:00") + np.arange(12).reshape(3, 4) * u.s

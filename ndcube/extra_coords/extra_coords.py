@@ -512,7 +512,10 @@ class ExtraCoords(ExtraCoordsABC):
             if np.isscalar(array_axes):
                 new_coord = coord.interpolate(new_grids[array_axes], **kwargs)
             else:
-                new_coord = coord.interpolate(*new_grids[np.asarray(array_axes)], **kwargs)
+                grids = new_grids[np.asarray(array_axes)]
+                if coord._model_inputs_are_pixel_ordered:
+                    grids = np.meshgrid(*grids, indexing="ij")
+                new_coord = coord.interpolate(*grids, **kwargs)
             new_ec.add(coord.names, array_axes, new_coord, physical_types=coord.physical_types)
         return new_ec
 
