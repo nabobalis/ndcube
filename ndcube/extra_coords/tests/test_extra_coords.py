@@ -609,3 +609,27 @@ def test_2d_time_extra_coord_through_cube(wcs_3d_lt_ln_l):
     point = cube[1, 2]
     assert point.extra_coords.is_empty
     assert len(point.extra_coords._dropped_tables) == 1
+
+
+@pytest.mark.parametrize("kind", ["quantity", "time", "wcs"])
+def test_rebin_extra_coords_pixel_centers(kind):
+    wcs = WCS(naxis=2)
+    wcs.wcs.crpix = [1, 1]
+    cube = NDCube(np.ones((4, 6)), wcs)
+    rows, columns = np.indices(cube.shape)
+    if kind == "wcs":
+        cube.extra_coords.wcs = wcs
+        cube.extra_coords.mapping = (0, 1)
+    else:
+        values = columns * u.m if kind == "quantity" else Time("2020-01-01") + columns * u.s
+        cube.extra_coords.add(kind, (0, 1), values)
+    rebinned = cube.rebin((2, 3))
+    x, y = np.meshgrid(np.arange(2), np.arange(2))
+    expected_x, expected_y = rebinned.wcs.low_level_wcs.pixel_to_world_values(x, y)
+    actual = rebinned.extra_coords.wcs.pixel_to_world(x, y)
+    if kind == "wcs":
+        np.testing.assert_allclose(actual[0].value, expected_x)
+        np.testing.assert_allclose(actual[1].value, expected_y)
+    else:
+        actual = actual.to_value(u.m) if kind == "quantity" else (actual - Time("2020-01-01")).to_value(u.s)
+        np.testing.assert_allclose(actual, expected_x, atol=1e-6)

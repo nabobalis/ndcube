@@ -497,8 +497,13 @@ class ExtraCoords(ExtraCoordsABC):
                 f"dimensions: len(offset) = {len(offset)}; No. cube dimensions = {ndim}.")
         # If ExtraCoords object built on WCS, resample using WCS insfrastructure
         if self._wcs is not None:
+            pixel_axes = self.mapping if self._mapping is not None else tuple(range(self._wcs.pixel_n_dim))
+            factor = np.asarray(factor)[::-1][list(pixel_axes)]
+            offset = np.asarray(offset)[::-1][list(pixel_axes)]
             new_ec.wcs = HighLevelWCSWrapper(ResampledLowLevelWCS(self._wcs.low_level_wcs,
                                                                   factor, offset))
+            if self._mapping is not None:
+                new_ec.mapping = self.mapping
             return new_ec
         # Else interpolate the lookup table coordinates.
         factor = np.asarray(factor)
