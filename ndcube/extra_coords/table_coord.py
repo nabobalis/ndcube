@@ -868,19 +868,22 @@ class TimeTableCoordinate(BaseTableCoordinate):
         if len(new_array_grids) != self.table.ndim:
             raise ValueError(
                 f"A new array grid must be given for each array axis, i.e. {self.table.ndim}")
-        # Interpolate using MJD format and convert back to a Time object.
+        # Interpolate offsets to avoid losing precision in absolute MJD values.
+        origin = self.table.ravel()[0]
+        deltas = (self.table - origin).to_value(u.s)
         if self.table.ndim == 1:
             # Build pixel grids for current TimeTableCoord.
             old_array_grids = np.arange(len(self.table))
-            new_table = np.interp(new_array_grids[0], old_array_grids, self.table.mjd, **kwargs)
+            new_table = np.interp(new_array_grids[0], old_array_grids, deltas, **kwargs)
         else:
             old_array_grids = tuple(np.arange(d) for d in self.table.shape)
             new_table = scipy.interpolate.interpn(
-                old_array_grids, self.table.mjd, np.stack(new_array_grids, axis=-1), **kwargs)
-        new_table = Time(new_table, scale=self.table.scale, format="mjd")
+                old_array_grids, deltas, np.stack(new_array_grids, axis=-1), **kwargs)
+        new_table = origin + new_table * u.s
         new_table.format = self.table.format
         # Rebuild new TimeTableCoord and return.
-        new_coord = type(self)(new_table, names=self.names, physical_types=self.physical_types)
+        new_coord = type(self)(new_table, names=self.names, physical_types=self.physical_types,
+                               reference_time=self.reference_time)
         new_coord._dropped_world_dimensions = self._dropped_world_dimensions
         return new_coord
 

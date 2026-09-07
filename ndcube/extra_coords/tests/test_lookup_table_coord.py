@@ -745,3 +745,13 @@ def test_2d_quantity_table_interpolate(quantitytable_2d):
 def test_multiple_nd_tables_rejected():
     with pytest.raises(ValueError, match="Multiple tables can only be provided if they are all 1-D"):
         QuantityTableCoordinate(np.ones((2, 2)) * u.km, np.ones((2, 2)) * u.km)
+
+
+@pytest.mark.parametrize("shape", [(6,), (2, 3)])
+def test_time_interpolate_precision_and_reference(shape):
+    origin = Time("2020-01-01", scale="tai")
+    table = origin + np.arange(6).reshape(shape) * 10 * u.ns
+    coord = TimeTableCoordinate(table, reference_time=origin - 1 * u.day)
+    result = coord.interpolate(*np.indices(shape))
+    np.testing.assert_allclose((result.table - table).to_value(u.ns), 0, atol=0.01)
+    assert result.reference_time == coord.reference_time
