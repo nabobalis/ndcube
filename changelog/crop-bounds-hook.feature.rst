@@ -1,0 +1,1 @@
+Subclasses of `~ndcube.NDCube` can override the new protected ``_get_crop_bounds`` method to give the pixel bounds for crops their WCS can't invert, such as a time-only crop of a raster whose pointing changes with time (see :ref:`customizing_crop`).

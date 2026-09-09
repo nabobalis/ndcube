@@ -70,3 +70,20 @@ Once you have a custom plotter class (e.g. ``CustomPlotter``) you can set this t
 
   class CustomCube(NDCube):
       plotter = PlotterDescriptor(default_type=CustomPlotter)
+
+.. _customizing_crop:
+
+Customizing crop bounds
+-----------------------
+
+:meth:`ndcube.NDCube.crop` and :meth:`ndcube.NDCube.crop_by_values` find the pixels to keep by inverting the WCS.
+If your WCS can't be inverted for some crops, for example a time-only crop of a raster whose pointing changes with time, override the protected ``_get_crop_bounds(self, points)`` method.
+
+``points`` is a list of points. Each point has one value per world axis of the cube's WCS, in the WCS's units (as ``world_to_pixel_values`` takes them), or ``None`` for a coordinate that isn't cropped.
+
+Return one entry per array axis, in array order: ``None`` to leave the axis uncropped, or an inclusive ``(lower, upper)`` pair of pixel coordinates, which can be fractional, enclosing all the points.
+NDCube then rounds, clips and applies ``keepdims`` as it does for its own bounds.
+Raise `ValueError` if no pixels match, or return ``NotImplemented`` to use the default WCS inversion.
+
+The method is only called for crops against the cube's own WCS, including through :meth:`ndcube.NDCubeSequence.crop`.
+It isn't called for other WCSes, such as ``wcs=cube.extra_coords``, or when every coordinate is ``None``.
