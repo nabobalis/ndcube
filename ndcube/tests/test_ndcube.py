@@ -337,3 +337,13 @@ def test_extra_attrs_to_copy_propagate_through_to_nddata(sidecar_cube):
     # Types which do not carry the attributes are unaffected.
     plain = sidecar_cube.to_nddata(nddata_type=astropy.nddata.NDData)
     assert not hasattr(plain, "observer")
+
+
+def test_extra_attrs_to_copy_without_constructor_kwargs(wcs_3d_lt_ln_l):
+    class BareCube(NDCube):
+        _extra_attrs_to_copy = ("observer",)
+
+    cube = BareCube(np.ones((2, 3, 4)), wcs=wcs_3d_lt_ln_l)
+    cube.observer = "earth"
+    assert (cube * 2).observer == "earth"
+    assert cube.to_nddata(nddata_type=BareCube).observer == "earth"

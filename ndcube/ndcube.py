@@ -978,8 +978,7 @@ class NDCube(NDCubeBase):
         if self.global_coords is not None:
             new_cube._global_coords = deepcopy(self.global_coords)
         for attr in self._extra_attrs_to_copy:
-            if hasattr(self, attr):
-                setattr(new_cube, attr, getattr(self, attr))
+            setattr(new_cube, attr, getattr(self, attr))
         return new_cube
 
     def __neg__(self):
@@ -1652,12 +1651,6 @@ class NDCube(NDCubeBase):
           array([[1., 1., 1.],
                  [1., 1., 1.]])
         """
-        # If the target type carries the same subclass-specific attributes as
-        # this cube, copy them by default unless explicitly overridden.
-        if isinstance(nddata_type, type) and issubclass(nddata_type, type(self)):
-            for attr in self._extra_attrs_to_copy:
-                if hasattr(self, attr):
-                    kwargs.setdefault(attr, "copy")
         # Put all NDData kwargs in a dict
         user_kwargs = {"data": data,
                        "wcs": wcs,
@@ -1671,8 +1664,14 @@ class NDCube(NDCubeBase):
         user_kwargs = {key: getattr(self, key)
                        if isinstance(value, str) and value == "copy" else value
                        for key, value in user_kwargs.items()}
-        # Construct and return new instance.
-        return nddata_type(**user_kwargs)
+        new_nddata = nddata_type(**user_kwargs)
+        # Propagate subclass-specific attributes by reference, as in _new_instance,
+        # unless explicitly overridden via kwargs.
+        if isinstance(nddata_type, type) and issubclass(nddata_type, type(self)):
+            for attr in self._extra_attrs_to_copy:
+                if attr not in kwargs:
+                    setattr(new_nddata, attr, getattr(self, attr))
+        return new_nddata
 
 
 def _create_masked_array_for_rebinning(data, mask, operation_ignores_mask):
