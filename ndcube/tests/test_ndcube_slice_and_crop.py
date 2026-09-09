@@ -652,6 +652,32 @@ def test_crop_by_values_many_axes_keeps_axis_order():
     assert (world[3], world[8]) == (1, 4)
 
 
+def test_crop_bounds_hook():
+    calls = []
+
+    class HookCube(NDCube):
+        def _get_crop_bounds(self, points, *, wcs):
+            calls.append(points)
+            return ((2, 2), None, None) if points[0][0] is None else NotImplemented
+
+    wcs = WCS(naxis=3)
+    wcs.wcs.ctype = ['RA---TAN', 'DEC--TAN', 'LINEAR']
+    wcs.wcs.cunit = ['deg', 'deg', 's']
+    cube = HookCube(np.arange(60).reshape(3, 4, 5), wcs=wcs)
+    cube.extra_coords.add('exposure', 0, [0, 1, 2] * u.s)
+    # Both APIs pass values in WCS units; keepdims applies to the returned bounds.
+    np.testing.assert_array_equal(cube.crop([None, 1000 * u.ms]).data, cube.data[2])
+    assert cube.crop_by_values([None, None, 1000], units=['deg', 'deg', 'ms'], keepdims=True).shape == (1, 4, 5)
+    assert calls == [[[None, None, 1]]] * 2
+    # NotImplemented falls back to the WCS inverse; sky values arrive in the WCS frame.
+    sky = cube.wcs.pixel_to_world(1, 2, 0)[0]
+    np.testing.assert_array_equal(cube.crop([sky.galactic, None]).data, cube.data[:, 2, 1])
+    np.testing.assert_allclose(calls[-1][0][:2], [sky.ra.deg, sky.dec.deg])
+    # Extra coords reach the hook padded with None for the cube axes they do not cover.
+    np.testing.assert_array_equal(cube.crop([1 * u.s], wcs=cube.extra_coords).data, cube.data[1])
+    assert calls[-1] == [[1, None, None]]
+
+
 def test_crop_by_values_quantity_table_coordinate():
     # Regression: QuantityTableCoordinate-based WCS raised
     # "High Level objects are not supported with the native API" because
