@@ -76,6 +76,8 @@ def sanitize_crop_inputs(points, wcs):
             points[i] = list(point)
         else:
             points[i] = [point]
+        if any(np.any(getattr(coord, "mask", False)) for coord in points[i]):
+            raise ValueError("Masked crop coordinates are not supported.")
         # Record number of objects in each point.
         # Later we will ensure all points have same number of objects.
         n_coords[i] = len(points[i])
@@ -141,6 +143,12 @@ def get_crop_item_from_points(points, wcs, crop_by_values, keepdims, original_sh
         will return the minimum cube in array-index-space that contains all the
         input world points.
     """
+    bounds = _get_crop_bounds_from_points(points, wcs, crop_by_values)
+    return _get_crop_item_from_bounds(bounds, keepdims, original_shape)
+
+
+def _get_crop_bounds_from_points(points, wcs, crop_by_values):
+    """Obtain inclusive fractional bounds in array order using the WCS inverse."""
     # Define a list of lists to hold the pixel coordinates of the points
     # where each inner list gives the pixel coordinates of all points for that pixel axis.
     # Recall that pixel axis ordering is reversed compared to array axis ordering.
@@ -164,7 +172,7 @@ def get_crop_item_from_points(points, wcs, crop_by_values, keepdims, original_sh
                 pixel_axes_with_input.append(point_inputs_pixel_axes[i])
         pixel_axes_with_input = set(chain.from_iterable(pixel_axes_with_input))
         pixel_axes_without_input = set(range(low_level_wcs.pixel_n_dim)) - pixel_axes_with_input
-        pixel_axes_with_input = np.array(list(pixel_axes_with_input))
+        pixel_axes_with_input = np.array(sorted(pixel_axes_with_input))
         pixel_axes_without_input = np.array(list(pixel_axes_without_input))
         # Slice out the axes that do not correspond to a coord
         # from the WCS and the input point.
@@ -202,16 +210,18 @@ def get_crop_item_from_points(points, wcs, crop_by_values, keepdims, original_sh
         for axis, index in zip(pixel_axes_with_input, point_pixel_indices):
             combined_points_pixel_idx[axis] = combined_points_pixel_idx[axis] + [index]
 
-    # Iterate through each array axis to determine the min and max pixel coords
-    # and then convert to array indices. Note that combined_points_pixel_idx holds the
-    # pixel coords for each pixel axis. Therefore, to iterate in array axis order,
-    # combined_points_pixel_idx must be reversed.
+    return tuple((min(coords), max(coords)) if coords else None
+                 for coords in combined_points_pixel_idx[::-1])
+
+
+def _get_crop_item_from_bounds(bounds, keepdims, original_shape):
+    """Convert array-ordered inclusive pixel-centre bounds to a crop item."""
     item = []
     ambiguous = False
     message = ""
     result_is_scalar = True
-    for array_axis, pixel_coords in enumerate(combined_points_pixel_idx[::-1]):
-        if pixel_coords == []:
+    for array_axis, pixel_coords in enumerate(bounds):
+        if pixel_coords is None:
             result_is_scalar = False
             item.append(slice(None))
         else:

@@ -7,6 +7,7 @@ import astropy.units as u
 import astropy.wcs
 from astropy.coordinates import SkyCoord, SpectralCoord
 from astropy.io import fits
+from astropy.nddata import StdDevUncertainty
 from astropy.time import Time
 from astropy.units import UnitsError
 from astropy.wcs import WCS
@@ -637,3 +638,79 @@ def test_crop_by_values_quantity_table_coordinate():
                                    wcs=cube.extra_coords)
     assert cropped.shape == (10, 5)
     np.testing.assert_array_equal(cropped.data, data[3:13, 1:6])
+
+
+@pytest.mark.parametrize("numeric", [False, True])
+@pytest.mark.parametrize("keepdims", [False, True])
+@pytest.mark.parametrize("rows", [1, 2])
+def test_crop_bounds_provider(numeric, keepdims, rows):
+    class ExposureCube(NDCube):
+        def _get_crop_bounds(self, points, *, wcs):
+            if wcs is not self.wcs.low_level_wcs or any(p[1] is not None for p in points):
+                return super()._get_crop_bounds(points, wcs=wcs)
+            assert points == [[1, None], [1, None]]
+            # A measured, nonmonotonic coordinate with repeated matches.
+            times = np.array([0, 1, 4, 1, 0, 9])[int(self.meta['offset']):][:self.shape[1]]
+            matches = np.flatnonzero(times == points[0][0])
+            if not matches.size:
+                raise ValueError("No exposures match the crop coordinates.")
+            return None, (matches.min(), matches.max())
+
+    wcs = WCS(naxis=2)
+    wcs.wcs.cunit = ['s', 'm']
+    # Use Quantity objects for both axes, to exercise positional identity.
+    wcs.wcs.ctype = ['LINEAR', 'LINEAR']
+    data = np.arange(rows * 6).reshape(rows, 6)
+    cube = ExposureCube(data, wcs=wcs, mask=data % 2 == 0, meta={'offset': 0},
+                        uncertainty=StdDevUncertainty(np.sqrt(data)), unit=u.ct)
+
+    def crop(cube):
+        if numeric:
+            return cube.crop_by_values([1000, None], [1000, None], units=['ms', 'm'], keepdims=keepdims)
+        return cube.crop([1000 * u.ms, None], [1 * u.s, None], keepdims=keepdims)
+
+    result = crop(cube)
+    np.testing.assert_array_equal(result.data, data[:, 1:4])
+    np.testing.assert_array_equal(result.mask, cube.mask[:, 1:4])
+    assert result.meta == cube.meta
+    assert result.unit == cube.unit
+    np.testing.assert_array_equal(result.uncertainty.array, cube.uncertainty.array[:, 1:4])
+    np.testing.assert_allclose(result.wcs.low_level_wcs.pixel_to_world_values(0, 0), cube.wcs.pixel_to_world_values(1, 0))
+    sliced = cube[:, 2:]
+    sliced.meta = {'offset': 2}
+    expected = sliced[:, 1:2] if keepdims else sliced[:, 1]
+    np.testing.assert_array_equal(crop(sliced).data, expected.data)
+    sliced = cube[:, 4:]
+    sliced.meta = {'offset': 4}
+    with pytest.raises(ValueError, match='No exposures match'):
+        crop(sliced)
+    np.testing.assert_array_equal(cube.crop([None, None]).data, data)
+    # A complete request delegates to the unchanged inverse implementation.
+    points = [cube.wcs.pixel_to_world(1, 0), cube.wcs.pixel_to_world(3, rows - 1)]
+    np.testing.assert_array_equal(cube.crop(*points, keepdims=True).data, data[:, 1:4])
+
+
+def test_crop_masked_coordinate():
+    cube = NDCube(np.zeros((2, 3)), wcs=WCS(naxis=2))
+    with pytest.raises(ValueError, match='Masked crop coordinates'):
+        cube.crop_by_values([np.ma.masked, None], units=['', ''])
+
+
+def test_crop_bounds_sky_normalization():
+    class RecordingCube(NDCube):
+        def _get_crop_bounds(self, points, *, wcs):
+            self.constraints = points
+            return super()._get_crop_bounds(points, wcs=wcs)
+
+    wcs = WCS(naxis=3)
+    wcs.wcs.ctype = ['RA---TAN', 'DEC--TAN', 'FREQ']
+    wcs.wcs.cunit = ['deg', 'deg', 'Hz']
+    cube = RecordingCube(np.arange(60).reshape(3, 4, 5), wcs=wcs)
+    sky, _ = cube.wcs.pixel_to_world(1, 2, 0)
+    high = cube.crop([sky.galactic, None], keepdims=True)
+    high_constraints = cube.constraints
+    low = cube.crop_by_values([sky.ra, sky.dec, None], keepdims=True)
+    np.testing.assert_array_equal(high.data, low.data)
+    np.testing.assert_allclose(high_constraints[0][:2], cube.constraints[0][:2], atol=1e-12)
+    assert high_constraints[0][2] is cube.constraints[0][2] is None
+

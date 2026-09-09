@@ -70,3 +70,31 @@ Once you have a custom plotter class (e.g. ``CustomPlotter``) you can set this t
 
   class CustomCube(NDCube):
       plotter = PlotterDescriptor(default_type=CustomPlotter)
+
+Customizing crop bounds
+-----------------------
+
+Subclasses can override the protected ``_get_crop_bounds(self, points, *, wcs)``
+extension point used by both :meth:`ndcube.NDCube.crop` and
+:meth:`ndcube.NDCube.crop_by_values`. Input validation and slice construction
+stay in NDCube.
+
+``points`` contains numeric world coordinates in the selected low-level WCS's
+units and axis order, with omitted components left as ``None``. High-level
+objects have already been converted to the WCS frame and units; use
+``wcs.world_axis_object_components`` to see which values belong to the same
+object (e.g. a sky coordinate). Empty and all-``None`` requests return the
+unchanged cube without calling the hook.
+
+Return a tuple in **array-axis order** with one entry per data axis:
+``None`` leaves an axis unconstrained, while ``(lower, upper)`` gives inclusive
+fractional pixel-centre bounds relative to the current cube. For example,
+``(None, (1, 4), (2, 2))`` keeps the first axis, selects indices 1 through 4
+on the second, and index 2 on the third. NDCube then applies its usual
+pixel-edge rounding, clipping, ambiguity warnings and ``keepdims`` handling.
+Apply all supplied constraints jointly, enclose every match in one bounding
+box, and raise ``ValueError`` when nothing matches.
+
+Return ``NotImplemented`` (or call ``super()._get_crop_bounds``) for requests
+you do not handle; NDCube then falls back to its inverse-based calculation.
+Check ``wcs`` first, since callers may pass an alternate WCS or ExtraCoords.

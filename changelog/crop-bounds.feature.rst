@@ -1,0 +1,1 @@
+Add a protected ``NDCube._get_crop_bounds`` extension point shared by both crop APIs, with normalized numeric world coordinates and shared pixel-bound slicing. The default retains inverse-based cropping. Masked crop coordinates now raise an explicit error.
