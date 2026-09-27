@@ -287,7 +287,8 @@ def test_crop_missing_dimensions(ndcube_4d_ln_lt_l_t):
     interval0 = cube.wcs.array_index_to_world([1, 2], [0, 1], [0, 1], [0, 2])[0]
     lower_corner = [interval0[0], None]
     upper_corner = [interval0[-1], None]
-    with pytest.raises(ValueError, match=r'2 components in point 0 do not match WCS with 3'):
+    with pytest.raises(ValueError, match=r'2 components in point 0 do not match WCS with 3 .* in order: '
+                                         r'time \(Time\), spectral \(Quantity\), celestial \(SkyCoord\)\.$'):
         cube.crop(lower_corner, upper_corner)
 
 
@@ -299,7 +300,8 @@ def test_crop_mismatch_class(ndcube_4d_ln_lt_l_t):
     lower_corner = [coord[0] for coord in intervals]
     upper_corner = [coord[-1] for coord in intervals]
     with pytest.raises(TypeError, match=r"<class .*.SpectralCoord'> of component 0 in point 0 is "
-                                        r"incompatible with WCS component time"):
+                                        r"incompatible with WCS component time .* Expected order: "
+                                        r"time \(Time\), spectral \(Quantity\), celestial \(SkyCoord\)\.$"):
         cube.crop(lower_corner, upper_corner)
 
 
@@ -470,6 +472,9 @@ def test_crop_by_extra_coords_all_axes_with_coord(ndcube_3d_ln_lt_l_ec_all_axes)
     output = cube.crop(lower_corner, upper_corner, wcs=cube.extra_coords)
     expected = cube[0, 0:2, 1:4]
     helpers.assert_cubes_equal(output, expected)
+    # 1 m matches both Quantity coords, so the point is matched by position.
+    output = cube.crop((None, None, interval2[0]), (None, None, interval2[1]), wcs=cube.extra_coords)
+    helpers.assert_cubes_equal(output, cube[:, :, 1:4])
 
 
 def test_crop_by_extra_coords_values_all_axes_with_coord(ndcube_3d_ln_lt_l_ec_all_axes):
@@ -615,6 +620,62 @@ def test_crop_all_points_beyond_cube_extent_error(points):
 
     with pytest.raises(ValueError, match="are outside the range of the NDCube being cropped"):
         cube.crop(*points, keepdims=True)
+
+
+def test_crop_non_contiguous_world_objects(ndcube_4d_ln_l_t_lt):
+    # World axes are HPLT, TIME, WAVE, HPLN, so the SkyCoord components are not
+    # adjacent. The expected object order is first appearance: SkyCoord, Time, Quantity.
+    cube = ndcube_4d_ln_l_t_lt
+    lower = cube.wcs.array_index_to_world(1, 0, 0, 4)[0]
+    upper = cube.wcs.array_index_to_world(2, 0, 0, 5)[0]
+    output = cube.crop([lower, None, None], [upper, None, None])
+    helpers.assert_cubes_equal(output, cube[1:3, :, :, 4:6])
+    # Unambiguous objects are matched to components by class, so any order works (#608).
+    sky, _, wave = cube.wcs.pixel_to_world(1, 2, 3, 4)
+    helpers.assert_cubes_equal(cube.crop([wave, sky, None], keepdims=True), cube[4:5, 3:4, :, 1:2])
+    # 1 matches no class, so the point is matched by position and rejected.
+    with pytest.raises(TypeError):
+        cube.crop([wave, sky, 1])
+
+
+def test_crop_by_values_many_axes_keeps_axis_order():
+    # Pixel axes 3 and 8 used to be visited in set order ([8, 3]) and swapped.
+    wcs = WCS(naxis=9)
+    wcs.wcs.ctype = ["LINEAR"] * 9
+    wcs.wcs.cunit = ["m"] * 9
+    cube = NDCube(np.zeros((5,) * 9, dtype=bool), wcs=wcs)
+    point = [None] * 9
+    point[3] = 1 * u.m
+    point[8] = 4 * u.m
+    output = cube.crop_by_values(point, keepdims=True)
+    world = output.wcs.low_level_wcs.pixel_to_world_values(*[0] * 9)
+    assert (world[3], world[8]) == (1, 4)
+
+
+def test_crop_bounds_hook():
+    calls = []
+
+    class HookCube(NDCube):
+        def _get_crop_bounds(self, points, *, wcs):
+            calls.append(points)
+            return ((2, 2), None, None) if points[0][0] is None else NotImplemented
+
+    wcs = WCS(naxis=3)
+    wcs.wcs.ctype = ['RA---TAN', 'DEC--TAN', 'LINEAR']
+    wcs.wcs.cunit = ['deg', 'deg', 's']
+    cube = HookCube(np.arange(60).reshape(3, 4, 5), wcs=wcs)
+    cube.extra_coords.add('exposure', 0, [0, 1, 2] * u.s)
+    # Both APIs pass values in WCS units; keepdims applies to the returned bounds.
+    np.testing.assert_array_equal(cube.crop([None, 1000 * u.ms]).data, cube.data[2])
+    assert cube.crop_by_values([None, None, 1000], units=['deg', 'deg', 'ms'], keepdims=True).shape == (1, 4, 5)
+    assert calls == [[[None, None, 1]]] * 2
+    # NotImplemented falls back to the WCS inverse; sky values arrive in the WCS frame.
+    sky = cube.wcs.pixel_to_world(1, 2, 0)[0]
+    np.testing.assert_array_equal(cube.crop([sky.galactic, None]).data, cube.data[:, 2, 1])
+    np.testing.assert_allclose(calls[-1][0][:2], [sky.ra.deg, sky.dec.deg])
+    # Extra coords reach the hook padded with None for the cube axes they do not cover.
+    np.testing.assert_array_equal(cube.crop([1 * u.s], wcs=cube.extra_coords).data, cube.data[1])
+    assert calls[-1] == [[1, None, None]]
 
 
 def test_crop_by_values_quantity_table_coordinate():

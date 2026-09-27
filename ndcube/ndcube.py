@@ -6,6 +6,7 @@ import textwrap
 from collections import namedtuple
 from collections.abc import Iterable, Mapping
 from copy import deepcopy
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -24,7 +25,7 @@ except ImportError:
 
 from astropy.wcs import WCS
 from astropy.wcs.wcsapi import BaseHighLevelWCS, HighLevelWCSWrapper
-from astropy.wcs.wcsapi.high_level_api import values_to_high_level_objects
+from astropy.wcs.wcsapi.high_level_api import high_level_objects_to_values, values_to_high_level_objects
 
 from ndcube import utils
 from ndcube.extra_coords.extra_coords import ExtraCoords, ExtraCoordsABC
@@ -633,24 +634,46 @@ class NDCubeBase(NDCubeABC, astropy.nddata.NDData, NDCubeSlicingMixin):
         # Quit out early if we are no-op
         if no_op:
             return tuple([slice(None)] * wcs.pixel_n_dim)
-        comp = [c[0] for c in wcs.world_axis_object_components]
-        # Trim to unique component names - `np.unique(..., return_index=True)
-        # keeps sorting alphabetically, set() seems just nondeterministic.
-        for k, c in enumerate(comp):
-            if comp.count(c) > 1:
-                comp.pop(k)
+        comp = utils.misc.unique_sorted(c[0] for c in wcs.world_axis_object_components)
         classes = [wcs.world_axis_object_classes[c][0] for c in comp]
+        expected = ", ".join(f"{name} ({cls.__name__})" for name, cls in zip(comp, classes))
         for i, point in enumerate(points):
             if len(point) != len(comp):
                 raise ValueError(f"{len(point)} components in point {i} do not match "
-                                 f"WCS with {len(comp)} components.")
+                                 f"WCS with {len(comp)} components. Each point must "
+                                 "have one entry per world object (use None for a "
+                                 f"component that should not be cropped), in order: {expected}.")
+            # Like astropy's world_to_pixel, match objects to components by class when unambiguous (#608).
+            vals = [v for v in point if v is not None]
+            slots = [[j for j, cls in enumerate(classes) if isinstance(v, cls)] for v in vals]
+            matched = {s[0]: v for v, s in zip(vals, slots) if len(s) == 1}
+            if len(matched) == len(vals):
+                points[i] = point = [matched.get(j) for j in range(len(comp))]
             for j, value in enumerate(point):
                 if not (value is None or isinstance(value, classes[j])):
                     raise TypeError(f"{type(value)} of component {j} in point {i} is "
                                     f"incompatible with WCS component {comp[j]} "
-                                    f"{classes[j]}.")
-        return utils.cube.get_crop_item_from_points(points, wcs, False, keepdims=keepdims,
-                                                    original_shape=self.data.shape)
+                                    f"{classes[j]}. Expected order: {expected}.")
+        bounds = NotImplemented
+        # Only convert to values when a subclass overrides the hook; the default path
+        # converts the high-level objects itself.
+        if type(self)._get_crop_bounds is not NDCubeBase._get_crop_bounds:
+            values = []
+            for point in points:
+                supplied = {key: value for key, value in zip(comp, point) if value is not None}
+                # high_level_objects_to_values reads only these attributes, and filtering
+                # the components lets it convert a partial point.
+                components = [c for c in wcs.world_axis_object_components if c[0] in supplied]
+                metadata = SimpleNamespace(world_axis_object_components=components,
+                                           world_axis_object_classes=wcs.world_axis_object_classes,
+                                           serialized_classes=wcs.serialized_classes)
+                converted = iter(high_level_objects_to_values(*supplied.values(), low_level_wcs=metadata))
+                values.append([next(converted) if key in supplied else None
+                               for key, *_ in wcs.world_axis_object_components])
+            bounds = self._get_crop_bounds(values, wcs=wcs)
+        if bounds is NotImplemented:
+            bounds = utils.cube._get_crop_bounds_from_points(points, wcs, False)
+        return utils.cube._get_crop_item_from_bounds(bounds, keepdims, self.data.shape)
 
     def crop_by_values(self, *points, units=None, wcs=None, keepdims=False):
         # The docstring is defined in NDCubeABC
@@ -692,8 +715,15 @@ class NDCubeBase(NDCubeABC, astropy.nddata.NDData, NDCubeSlicingMixin):
                         raise UnitsError(f"Unit '{points[i][j].unit}' of coordinate object {j} in point {i} is "
                                          f"incompatible with WCS unit '{wcs.world_axis_units[j]}'") from err
 
-        return utils.cube.get_crop_item_from_points(points, wcs, True, keepdims=keepdims,
-                                                    original_shape=self.data.shape)
+        values = [[None if value is None else value.value for value in point] for point in points]
+        bounds = self._get_crop_bounds(values, wcs=wcs)
+        if bounds is NotImplemented:
+            bounds = utils.cube._get_crop_bounds_from_points(points, wcs, True)
+        return utils.cube._get_crop_item_from_bounds(bounds, keepdims, self.data.shape)
+
+    def _get_crop_bounds(self, points, *, wcs):
+        """Return pixel bounds for crops the WCS cannot invert; see :ref:`customizing_crop`."""
+        return NotImplemented
 
     def __str__(self):
         return textwrap.dedent(f"""\
