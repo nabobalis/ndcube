@@ -516,8 +516,10 @@ class NDCubeBase(NDCubeABC, astropy.nddata.NDData, NDCubeSlicingMixin):
         else:
             ranges = [np.arange(i) for i in pixel_shape]
         # Limit the pixel dimensions to the ones present in the ExtraCoords
+        pixel_axes = None
         if isinstance(wcs, ExtraCoords):
-            ranges = [ranges[i] for i in wcs.mapping]
+            pixel_axes = np.asarray(wcs.mapping)
+            ranges = [ranges[i] for i in pixel_axes]
             wcs = wcs.wcs
             if wcs is None:
                 return ()
@@ -556,8 +558,10 @@ class NDCubeBase(NDCubeABC, astropy.nddata.NDData, NDCubeSlicingMixin):
             for idx in world_axes_indices:
                 array_slice = np.zeros((wcs.pixel_n_dim,), dtype=object)
                 array_slice[wcs.axis_correlation_matrix[idx]] = slice(None)
-                tmp_world = world[idx][tuple(array_slice)].T
-                world_coords[idx] = tmp_world
+                # Order correlated axes by descending (cube) pixel axis, i.e. array order.
+                corr = np.flatnonzero(wcs.axis_correlation_matrix[idx])
+                corr = corr if pixel_axes is None else pixel_axes[corr]
+                world_coords[idx] = np.transpose(world[idx][tuple(array_slice)], np.argsort(corr)[::-1])
         if units:
             for i, (coord, unit) in enumerate(zip(world_coords, wcs.world_axis_units)):
                 world_coords[i] = coord << u.Unit(unit)

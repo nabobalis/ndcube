@@ -282,24 +282,7 @@ class BaseTableCoordinate(abc.ABC):
         Generate the Astropy Model for this LookupTable.
         """
 
-    @property
-    def _model_inputs_are_pixel_ordered(self):
-        """
-        True when this coordinate's model inputs are in pixel order.
-
-        Single N-D tables span several pixel dimensions with one model. Their
-        model inputs are exposed in pixel order (reversed array order) so the
-        resulting WCS follows the APE-14 convention expected by
-        `~ndcube.NDCube`.
-        """
-        return False
-
-    @staticmethod
-    def _reorder_inputs_to_pixel(model):
-        """
-        Reverse a model's inputs from array order to pixel order.
-        """
-        return models.Mapping(tuple(range(model.n_inputs))[::-1]) | model
+    _is_single_nd_table = False
 
     @property
     def wcs(self):
@@ -403,7 +386,7 @@ class QuantityTableCoordinate(BaseTableCoordinate):
             new_components["physical_types"].append(self.physical_types[i])
 
     @property
-    def _single_nd_table(self):
+    def _is_single_nd_table(self):
         return len(self.table) == 1 and self.table[0].ndim > 1
 
     def __getitem__(self, item):
@@ -412,7 +395,7 @@ class QuantityTableCoordinate(BaseTableCoordinate):
         if not (len(item) == len(self.table) or len(item) == self.table[0].ndim):
             raise ValueError("Can not slice with incorrect length")
 
-        if self._single_nd_table:
+        if self._is_single_nd_table:
             # A single N-D table represents one world coordinate, so slicing
             # reduces the table but never splits or drops individual world
             # components.
@@ -450,19 +433,11 @@ class QuantityTableCoordinate(BaseTableCoordinate):
         return _generate_generic_frame(len(self.table), self.unit, self.names, self.physical_types)
 
     @property
-    def _model_inputs_are_pixel_ordered(self):
-        # Docstring inherited.
-        return self._single_nd_table
-
-    @property
     def model(self):
         """
         Generate the Astropy Model for this LookupTable.
         """
-        model = _model_from_quantity(self.table, True)
-        if self._single_nd_table:
-            model = self._reorder_inputs_to_pixel(model)
-        return model
+        return _model_from_quantity(self.table, True)
 
     @property
     def ndim(self):
@@ -472,7 +447,7 @@ class QuantityTableCoordinate(BaseTableCoordinate):
         Note this may be different from the number of the dimensions in the
         underlying table(s) if different tables represent different dimensions.
         """
-        if self._single_nd_table:
+        if self._is_single_nd_table:
             return self.table[0].ndim
         return len(self.table)
 
@@ -484,7 +459,7 @@ class QuantityTableCoordinate(BaseTableCoordinate):
         Note this may be different from the shape of the underlying table(s)
         if different tables represent a different dimensions.
         """
-        if self._single_nd_table:
+        if self._is_single_nd_table:
             return self.table[0].shape
         return tuple(len(t) for t in self.table)
 
@@ -521,7 +496,7 @@ class QuantityTableCoordinate(BaseTableCoordinate):
             raise ValueError("New array grids must all be same shape.")
         # Build array grids for non-interpolated table.
         old_array_grids = tuple(np.arange(d) for d in self.shape)
-        if self._single_nd_table:
+        if self._is_single_nd_table:
             table = self.table[0]
             new_values = scipy.interpolate.interpn(
                 old_array_grids, table.value, np.stack(new_array_grids, axis=-1), **kwargs)
@@ -752,6 +727,11 @@ class SkyCoordTableCoordinate(BaseTableCoordinate):
         return new_coord
 
 
+    @property
+    def _is_single_nd_table(self):
+        return not self.mesh and self.table.ndim > 1
+
+
 class TimeTableCoordinate(BaseTableCoordinate):
     """
     A lookup table based on a `~astropy.time.Time`.
@@ -827,8 +807,7 @@ class TimeTableCoordinate(BaseTableCoordinate):
                                 name="TemporalFrame")
 
     @property
-    def _model_inputs_are_pixel_ordered(self):
-        # Docstring inherited.
+    def _is_single_nd_table(self):
         return self.table.ndim > 1
 
     @property
@@ -839,10 +818,7 @@ class TimeTableCoordinate(BaseTableCoordinate):
         time = self.table
         deltas = (time - self.reference_time).to(u.s)
 
-        model = _model_from_quantity((deltas,), mesh=False)
-        if deltas.ndim > 1:
-            model = self._reorder_inputs_to_pixel(model)
-        return model
+        return _model_from_quantity((deltas,), mesh=False)
 
     def interpolate(self, *new_array_grids, **kwargs):
         """

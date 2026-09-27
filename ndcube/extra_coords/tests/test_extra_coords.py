@@ -286,7 +286,7 @@ def test_extra_coords_index(skycoord_2d_lut, time_lut):
 def test_extra_coords_2d_quantity(quantity_2d_lut):
     ec = ExtraCoords()
     ec.add("velocity", (0, 1), quantity_2d_lut)
-    assert u.allclose(ec.wcs.pixel_to_world(1, 2), quantity_2d_lut[2, 1])
+    assert u.allclose(ec.wcs.pixel_to_world(2, 1), quantity_2d_lut[2, 1])
 
 
 # Extra Coords with NDCube
@@ -572,7 +572,7 @@ def test_nd_table_resample(shape, kind):
     for factor in (1, 2):
         resampled = cube.extra_coords.resample(factor)
         rows, columns = np.indices(table[::factor, ::factor].shape)
-        actual = resampled.wcs.pixel_to_world(columns, rows)
+        actual = resampled.wcs.pixel_to_world(rows, columns)
         assert actual.shape == table[::factor, ::factor].shape
         difference = actual - table[::factor, ::factor]
         unit = u.m if kind == "quantity" else u.s
@@ -609,3 +609,28 @@ def test_2d_time_extra_coord_through_cube(wcs_3d_lt_ln_l):
     point = cube[1, 2]
     assert point.extra_coords.is_empty
     assert len(point.extra_coords._dropped_tables) == 1
+
+
+@pytest.mark.parametrize("kind", ["quantity", "time", "skycoord"])
+@pytest.mark.parametrize("axes", [(0, 1), (1, 0)])
+def test_nd_table_any_axis_order(kind, axes):
+    values = np.arange(12).reshape(3, 4)
+    table = {"quantity": values * u.m,
+             "time": Time("2020-01-01") + values * u.s,
+             "skycoord": SkyCoord(values * u.deg, values * u.deg)}[kind]
+    names = ("lon", "lat") if kind == "skycoord" else kind
+    cube = NDCube(np.zeros((3, 4)), WCS(naxis=2))
+    cube.extra_coords.add(names, axes, table if axes == (0, 1) else table.T)
+    for item in (slice(None), np.s_[1:3, 0:2]):
+        sub = cube[item]
+        (coord,) = sub.axis_world_coords(wcs=sub.extra_coords)
+        assert coord.shape == table[item].shape
+        assert np.all(coord == table[item])
+
+
+def test_multi_table_integer_slice():
+    cube = NDCube(np.zeros((3, 4, 5)), WCS(naxis=3))
+    cube.extra_coords.add(("x", "y"), (0, 1), [np.arange(3) * u.km, np.arange(4) * u.km])
+    sub = cube[1]
+    (y,) = sub.axis_world_coords_values(wcs=sub.extra_coords)
+    assert u.allclose(y, np.arange(4) * u.km)

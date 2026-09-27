@@ -674,7 +674,7 @@ def test_2d_time_table(timetable_2d):
     assert twcs.pixel_n_dim == 2
     assert twcs.world_n_dim == 1
     # Model inputs are in pixel order, i.e. reversed array order.
-    assert twcs.pixel_to_world(1, 2) == timetable_2d.table[2, 1]
+    assert twcs.pixel_to_world(2, 1) == timetable_2d.table[2, 1]
 
 
 def test_2d_time_table_slicing(timetable_2d):
@@ -716,7 +716,7 @@ def test_2d_quantity_table(quantitytable_2d):
     assert qwcs.pixel_n_dim == 2
     assert qwcs.world_n_dim == 1
     # Model inputs are in pixel order, i.e. reversed array order.
-    assert qwcs.pixel_to_world(1, 2) == quantitytable_2d.table[0][2, 1]
+    assert qwcs.pixel_to_world(2, 1) == quantitytable_2d.table[0][2, 1]
 
 
 def test_2d_quantity_table_slicing(quantitytable_2d):

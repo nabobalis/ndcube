@@ -260,17 +260,9 @@ class ExtraCoords(ExtraCoordsABC):
 
         # The mapping is from the array index (position in the list) to the
         # pixel dimensions (numbers in the list)
+        lts = [list([lt[0]] if isinstance(lt[0], Integral) else lt[0]) for lt in self._lookup_tables]
         converter = partial(convert_between_array_and_pixel_axes, naxes=len(self._ndcube.shape))
-        pixel_indicies = []
-        for lut_axis, lut in self._lookup_tables:
-            ids = [lut_axis] if isinstance(lut_axis, Integral) else list(lut_axis)
-            pixel_ids = list(converter(np.array(ids)))
-            if lut._model_inputs_are_pixel_ordered:
-                # Single N-D tables expose their model inputs in pixel order,
-                # i.e. reversed with respect to the array-ordered axes given
-                # to `add`.
-                pixel_ids = pixel_ids[::-1]
-            pixel_indicies.append(pixel_ids)
+        pixel_indicies = [list(converter(np.array(ids))) for ids in lts]
         return tuple(reduce(list.__add__, pixel_indicies))
 
     @mapping.setter
@@ -377,13 +369,7 @@ class ExtraCoords(ExtraCoordsABC):
             if sliced_lut.is_scalar():
                 dropped_tables.add(sliced_lut)
             else:
-                kept_axes = lut_axes
-                if sliced_lut.n_inputs < len(lut_axes):
-                    # The sliced table lost pixel dimensions (e.g. an N-D
-                    # table sliced with an integer), so drop the
-                    # integer-sliced axes from the table's axes.
-                    kept_axes = tuple(ax for ax in lut_axes if not isinstance(item[ax], Integral))
-                new_lut_axes = tuple(ax - n_dropped_dims[ax] for ax in kept_axes)
+                new_lut_axes = tuple(ax - n_dropped_dims[ax] for ax in lut_axes if not isinstance(item[ax], Integral))
                 new_lookup_tables.add((new_lut_axes, sliced_lut))
         new_extra_coords = type(self)()
         new_extra_coords._lookup_tables = list(new_lookup_tables)
@@ -513,7 +499,7 @@ class ExtraCoords(ExtraCoordsABC):
                 new_coord = coord.interpolate(new_grids[array_axes], **kwargs)
             else:
                 grids = new_grids[np.asarray(array_axes)]
-                if coord._model_inputs_are_pixel_ordered:
+                if coord._is_single_nd_table:
                     grids = np.meshgrid(*grids, indexing="ij")
                 new_coord = coord.interpolate(*grids, **kwargs)
             new_ec.add(coord.names, array_axes, new_coord, physical_types=coord.physical_types)
