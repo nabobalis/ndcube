@@ -136,6 +136,26 @@ def test_slice_negative_and_out_of_range_bounds(basic_meta, item, expected):
     assert output.data_shape[1] == len(expected)
 
 
+def test_slice_shares_values_without_axes(basic_meta):
+    meta = basic_meta
+    meta.add("header", {"KEY": "value"})
+    output = meta.slice[0, 1:3]
+    assert output["header"] is meta["header"]
+    assert output["c"] is not meta["c"]
+
+
+def test_slice_leaves_original_unchanged(basic_meta):
+    meta = basic_meta
+    expected = copy.deepcopy(meta)
+    output = meta.slice[0, 1:3]
+    output.add("c", np.zeros((2, 4)), "New comment C", (0, 2), overwrite=True)
+    output.add("e", [7, 8], "Comment E", 0, overwrite=True)
+    del output["g"]
+    assert_metas_equal(meta, expected)
+    assert meta.axes.keys() == expected.axes.keys()
+    assert meta.key_comments == expected.key_comments
+
+
 def test_slice_by_str(basic_meta):
     meta = basic_meta
     assert meta["a"] == "hello"
