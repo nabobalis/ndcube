@@ -312,6 +312,17 @@ class NDMeta(dict, NDMetaABC):
     def original_meta(self):
         return MappingProxyType(self._original_meta)
 
+    def __copy__(self):
+        # Share the values, but not the axes, key comments and data shape,
+        # which add, del and slicing change in place.
+        new_meta = type(self).__new__(type(self))
+        new_meta.__dict__.update(self.__dict__)
+        dict.update(new_meta, self)
+        new_meta._axes = dict(self._axes)
+        new_meta._key_comments = dict(self._key_comments)
+        new_meta._data_shape = self._data_shape.copy()
+        return new_meta
+
     @property
     def slice(self):
         # Docstring in ABC.
