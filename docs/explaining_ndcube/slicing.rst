@@ -469,6 +469,7 @@ Moreover, because the first axis has been sliced away, ``"exposure time"`` is no
   ['pixel response']
 
 Finally, note that axis-agnostic metadata is unaltered by the slicing process.
+It is not copied either: ``sliced_meta`` holds the same objects as ``meta``, so changing one of them in place changes it in both.
 
 .. code-block:: python
 

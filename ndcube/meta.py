@@ -378,7 +378,9 @@ class _NDMetaSlicer:
         if len(data_shape) == 0:
             raise TypeError("NDMeta object does not have a shape and so cannot be sliced.")
 
-        new_meta = copy.deepcopy(self.meta)
+        # Values that are not axis-aware are shared with the unsliced meta, as a dict meta is shared.
+        # The axis-aware values are replaced by sliced ones below.
+        new_meta = copy.copy(self.meta)
         naxes = len(data_shape)
         if isinstance(item, (numbers.Integral, slice)):
             item = [item]
