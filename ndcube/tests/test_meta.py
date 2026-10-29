@@ -201,6 +201,20 @@ def test_del(basic_meta):
     assert name not in meta.axes.keys()
 
 
+def test_copy(basic_meta):
+    meta = basic_meta
+    expected = copy.deepcopy(meta)
+    meta_copy = copy.copy(meta)
+    assert_metas_equal(meta_copy, meta)
+    assert meta_copy["c"] is meta["c"]
+    # Axis 2 has no length yet, so this add also sets it in the copy's data shape.
+    meta_copy.add("z", np.arange(5), "Comment Z", 2)
+    del meta_copy["b"]
+    assert_metas_equal(meta, expected)
+    assert meta.axes.keys() == expected.axes.keys()
+    assert meta.key_comments == expected.key_comments
+
+
 def test_rebin(basic_meta):
     meta = basic_meta
     bin_shape = (2, 1, 1, 2)
